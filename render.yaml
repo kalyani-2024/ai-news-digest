@@ -1,0 +1,26 @@
+services:
+  - type: cron
+    name: ai-news-digest
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    schedule: "0 6 * * *"
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: MY_EMAIL
+        sync: false
+      - key: APP_PASSWORD
+        sync: false
+      - key: DIGEST_RECIPIENTS
+        sync: false
+      - key: USER_NAME
+        sync: false
+      - key: YOUTUBE_CHANNELS
+        sync: false
+      - key: PIPELINE_HOURS
+        value: "24"
+      - key: PIPELINE_TOP_N
+        value: "10"
