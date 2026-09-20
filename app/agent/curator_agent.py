@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.agent.client import get_client, CURATOR_MODEL
+from app.agent.client import get_client, generate, CURATOR_MODEL
 
 
 class RankedArticle(BaseModel):
@@ -81,10 +81,11 @@ Preferences:
 Provide a relevance score (0.0-10.0) and rank (1-{len(digests)}) for each article, ordered from most to least relevant."""
 
         try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
+            response = generate(
+                self.client,
+                self.model,
+                user_prompt,
+                types.GenerateContentConfig(
                     system_instruction=self.system_prompt,
                     temperature=0.3,
                     response_mime_type="application/json",

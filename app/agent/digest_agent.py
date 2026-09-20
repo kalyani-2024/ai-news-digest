@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.agent.client import get_client, DIGEST_MODEL
+from app.agent.client import get_client, generate, DIGEST_MODEL
 
 
 class DigestOutput(BaseModel):
@@ -34,10 +34,11 @@ class DigestAgent:
         try:
             user_prompt = f"Create a digest for this {article_type}: \n Title: {title} \n Content: {content[:8000]}"
 
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
+            response = generate(
+                self.client,
+                self.model,
+                user_prompt,
+                types.GenerateContentConfig(
                     system_instruction=self.system_prompt,
                     temperature=0.7,
                     response_mime_type="application/json",

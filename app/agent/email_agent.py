@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.agent.client import get_client, EMAIL_MODEL
+from app.agent.client import get_client, generate, EMAIL_MODEL
 
 
 class EmailIntroduction(BaseModel):
@@ -90,10 +90,11 @@ Top 10 ranked articles:
 Generate a greeting and introduction that previews these articles."""
 
         try:
-            response = self.client.models.generate_content(
-                model=self.model,
-                contents=user_prompt,
-                config=types.GenerateContentConfig(
+            response = generate(
+                self.client,
+                self.model,
+                user_prompt,
+                types.GenerateContentConfig(
                     system_instruction=EMAIL_PROMPT,
                     temperature=0.7,
                     response_mime_type="application/json",

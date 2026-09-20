@@ -119,6 +119,8 @@ Google retires model names faster than most providers, and a stale name fails at
 uv run python -c "from app.agent.client import get_client; [print(m.name) for m in get_client().models.list()]"
 ```
 
+Transient `503 UNAVAILABLE` responses are common on the Flash models. Every Gemini call retries with exponential backoff and then falls back to a second model, so a spike no longer loses a whole run. Tune with `GEMINI_MAX_ATTEMPTS` (default 4) and `GEMINI_FALLBACK_MODEL`.
+
 Note that the list endpoint advertises models that `generateContent` will still refuse, so confirm with a real call before relying on one. The Pro tier models return `429 RESOURCE_EXHAUSTED` on a free API key — stick to Flash unless the key is on a paid plan.
 
 ## Cost
