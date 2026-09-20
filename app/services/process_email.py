@@ -17,6 +17,14 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+class NoArticlesError(Exception):
+    """No articles were published in the requested window.
+
+    A quiet day is a normal outcome, not a pipeline failure, so this is kept
+    distinct from errors that mean something actually went wrong.
+    """
+
+
 def generate_email_digest(hours: int = 24, top_n: int = 10) -> EmailDigestResponse:
     curator = CuratorAgent(USER_PROFILE)
     email_agent = EmailAgent(USER_PROFILE)
@@ -26,8 +34,7 @@ def generate_email_digest(hours: int = 24, top_n: int = 10) -> EmailDigestRespon
     total = len(digests)
     
     if total == 0:
-        logger.warning(f"No digests found from the last {hours} hours")
-        raise ValueError("No digests available")
+        raise NoArticlesError(f"No articles published in the last {hours} hours")
     
     logger.info(f"Ranking {total} digests for email generation")
     ranked_articles = curator.rank_digests(digests)
@@ -85,6 +92,14 @@ def send_digest_email(hours: int = 24, top_n: int = 10) -> dict:
             "success": True,
             "subject": subject,
             "articles_count": len(result.articles)
+        }
+    except NoArticlesError as e:
+        logger.info(f"{e} - nothing to send")
+        return {
+            "success": True,
+            "skipped": True,
+            "reason": str(e),
+            "articles_count": 0
         }
     except ValueError as e:
         logger.error(f"Error sending email: {e}")

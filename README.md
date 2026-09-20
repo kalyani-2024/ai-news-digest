@@ -97,6 +97,8 @@ The pipeline is a scheduled batch job, not a web service, so it deploys as a Ren
 
 The default schedule is `0 6 * * *` — 06:00 UTC daily. Render cron schedules are always UTC, so adjust the hour for your timezone. `run_pipeline.py` calls `create_tables()` on every run, so the first run provisions the schema itself.
 
+A run that finds no new articles is a success, not a failure: it logs `Email: Nothing to send` and exits 0, so quiet days do not show as failed cron runs. Note that a digest's lookback window is measured against the article's **publication** time, not when it was processed, so a 24-hour window only catches articles published in the last 24 hours.
+
 Notes on the deployment shape:
 
 - **Docker, not a native Python runtime.** Docling pulls in torch, transformers, and OpenCV, which need system libraries (`libgl1`, `libglib2.0-0`) that the Dockerfile installs.
