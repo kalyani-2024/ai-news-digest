@@ -2,6 +2,21 @@
 
 A daily digest pipeline that follows AI news for me so I don't have to. It scrapes OpenAI, Anthropic, and YouTube, summarizes each item with an LLM, ranks everything against a personal interest profile, and emails the top stories as a formatted digest.
 
+## What it produces
+
+Each morning the pipeline emails the day's top AI stories, ranked against a personal interest profile and summarized down to a few sentences each.
+
+![Daily AI news digest email](docs/images/digest-top.png)
+
+<details>
+<summary>See the rest of the digest</summary>
+
+![Ranked articles, continued](docs/images/digest-middle.png)
+
+![Final articles and linked video sources](docs/images/digest-bottom.png)
+
+</details>
+
 ## How it works
 
 The pipeline runs as five sequential stages, orchestrated by `run_daily_pipeline()`:
