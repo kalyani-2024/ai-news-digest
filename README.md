@@ -43,11 +43,25 @@ Fill in `.env`:
 | --- | --- |
 | `GEMINI_API_KEY` | Required. Get one at [aistudio.google.com](https://aistudio.google.com/apikey) |
 | `DIGEST_MODEL` / `CURATOR_MODEL` / `EMAIL_MODEL` | Optional overrides. See Models below |
-| `MY_EMAIL` / `APP_PASSWORD` | Gmail address and an [app password](https://support.google.com/accounts/answer/185833) — not your account password |
+| `MY_EMAIL` / `APP_PASSWORD` | Gmail address and an [app password](https://support.google.com/accounts/answer/185833) — not your account password. Strip the spaces from the 16-character value, and generate it while signed into the same account as `MY_EMAIL` |
 | `DIGEST_RECIPIENTS` | Comma-separated. Defaults to `MY_EMAIL` |
 | `DATABASE_URL` | Full connection string. Leave blank locally to use the `POSTGRES_*` parts |
 | `USER_NAME`, `USER_TITLE`, `USER_BACKGROUND` | Shape how the curator ranks |
 | `YOUTUBE_CHANNELS` | Comma-separated channel IDs |
+
+Keep `.env` at the project root. A second `.env` inside `app/` will shadow it for every module in that package, which fails in confusing ways; [app/__init__.py](app/__init__.py) pins loading to the root file to make that harder to trip over.
+
+### Hosted Postgres
+
+For Supabase, use the **Session pooler** string, not Direct connection — the direct host (`db.<ref>.supabase.co`) is IPv6-only and unreachable from most CI and hosting providers, including Render:
+
+```
+DATABASE_URL=postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require
+```
+
+Percent-encode special characters in the password (`@` → `%40`, `#` → `%23`, `/` → `%2F`).
+
+### Local Postgres
 
 Start Postgres and create the schema:
 
