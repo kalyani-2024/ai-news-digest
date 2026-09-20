@@ -18,6 +18,12 @@ services:
         sync: false
       - key: USER_NAME
         sync: false
+      - key: USER_TITLE
+        sync: false
+      - key: USER_BACKGROUND
+        sync: false
+      - key: USER_EXPERTISE_LEVEL
+        sync: false
       - key: YOUTUBE_CHANNELS
         sync: false
       - key: PIPELINE_HOURS
