@@ -1,10 +1,11 @@
-import os
 from typing import List
-from openai import OpenAI
+from google.genai import types
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from app.agent.client import get_client, CURATOR_MODEL
 
 
 class RankedArticle(BaseModel):
@@ -41,8 +42,8 @@ Rank articles from most relevant (rank 1) to least relevant. Ensure each article
 
 class CuratorAgent:
     def __init__(self, user_profile: dict):
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-4.1"
+        self.client = get_client()
+        self.model = CURATOR_MODEL
         self.user_profile = user_profile
         self.system_prompt = self._build_system_prompt()
 
@@ -80,15 +81,18 @@ Preferences:
 Provide a relevance score (0.0-10.0) and rank (1-{len(digests)}) for each article, ordered from most to least relevant."""
 
         try:
-            response = self.client.responses.parse(
+            response = self.client.models.generate_content(
                 model=self.model,
-                instructions=self.system_prompt,
-                temperature=0.3,
-                input=user_prompt,
-                text_format=RankedDigestList
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_prompt,
+                    temperature=0.3,
+                    response_mime_type="application/json",
+                    response_schema=RankedDigestList,
+                ),
             )
-            
-            ranked_list = response.output_parsed
+
+            ranked_list = response.parsed
             return ranked_list.articles if ranked_list else []
         except Exception as e:
             print(f"Error ranking digests: {e}")

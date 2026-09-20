@@ -1,10 +1,11 @@
-import os
 from typing import Optional
-from openai import OpenAI
+from google.genai import types
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from app.agent.client import get_client, DIGEST_MODEL
 
 
 class DigestOutput(BaseModel):
@@ -25,24 +26,26 @@ Guidelines:
 
 class DigestAgent:
     def __init__(self):
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-4o-mini"
+        self.client = get_client()
+        self.model = DIGEST_MODEL
         self.system_prompt = PROMPT
 
     def generate_digest(self, title: str, content: str, article_type: str) -> Optional[DigestOutput]:
         try:
             user_prompt = f"Create a digest for this {article_type}: \n Title: {title} \n Content: {content[:8000]}"
 
-            response = self.client.responses.parse(
+            response = self.client.models.generate_content(
                 model=self.model,
-                instructions=self.system_prompt,
-                temperature=0.7,
-                input=user_prompt,
-                text_format=DigestOutput
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=self.system_prompt,
+                    temperature=0.7,
+                    response_mime_type="application/json",
+                    response_schema=DigestOutput,
+                ),
             )
-            
-            return response.output_parsed
+
+            return response.parsed
         except Exception as e:
             print(f"Error generating digest: {e}")
             return None
-

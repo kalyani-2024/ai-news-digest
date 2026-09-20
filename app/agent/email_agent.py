@@ -1,11 +1,12 @@
-import os
 from datetime import datetime
 from typing import List, Optional
-from openai import OpenAI
+from google.genai import types
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
+
+from app.agent.client import get_client, EMAIL_MODEL
 
 
 class EmailIntroduction(BaseModel):
@@ -63,8 +64,8 @@ Keep it concise (2-3 sentences for the introduction), friendly, and professional
 
 class EmailAgent:
     def __init__(self, user_profile: dict):
-        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-4o-mini"
+        self.client = get_client()
+        self.model = EMAIL_MODEL
         self.user_profile = user_profile
 
     def generate_introduction(self, ranked_articles: List) -> EmailIntroduction:
@@ -89,15 +90,18 @@ Top 10 ranked articles:
 Generate a greeting and introduction that previews these articles."""
 
         try:
-            response = self.client.responses.parse(
+            response = self.client.models.generate_content(
                 model=self.model,
-                instructions=EMAIL_PROMPT,
-                temperature=0.7,
-                input=user_prompt,
-                text_format=EmailIntroduction
+                contents=user_prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=EMAIL_PROMPT,
+                    temperature=0.7,
+                    response_mime_type="application/json",
+                    response_schema=EmailIntroduction,
+                ),
             )
-            
-            intro = response.output_parsed
+
+            intro = response.parsed
             if not intro.greeting.startswith(f"Hey {self.user_profile['name']}"):
                 intro.greeting = f"Hey {self.user_profile['name']}, here is your daily digest of AI news for {current_date}."
             
