@@ -1,8 +1,23 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 import feedparser
-from docling.document_converter import DocumentConverter
+import requests
+from html_to_markdown import convert, ConversionOptions
 from pydantic import BaseModel
+
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+)
+
+# Drop page chrome and inline images: the summarizer only reads the first few
+# thousand characters, so navigation and base64 data URIs would crowd out the
+# article itself.
+MARKDOWN_OPTIONS = ConversionOptions(
+    extract_metadata=False,
+    skip_images=True,
+    exclude_selectors=["nav", "header", "footer", "aside", "script", "style", "form"],
+)
 
 
 class AnthropicArticle(BaseModel):
@@ -21,7 +36,6 @@ class AnthropicScraper:
             "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_research.xml",
             "https://raw.githubusercontent.com/Olshansk/rss-feeds/main/feeds/feed_anthropic_engineering.xml",
         ]
-        self.converter = DocumentConverter()
 
     def get_articles(self, hours: int = 24) -> List[AnthropicArticle]:
         now = datetime.now(timezone.utc)
@@ -57,8 +71,11 @@ class AnthropicScraper:
 
     def url_to_markdown(self, url: str) -> Optional[str]:
         try:
-            result = self.converter.convert(url)
-            return result.document.export_to_markdown()
+            response = requests.get(url, timeout=30, headers={"User-Agent": USER_AGENT})
+            response.raise_for_status()
+            if not response.encoding or "charset" not in response.headers.get("content-type", ""):
+                response.encoding = response.apparent_encoding or "utf-8"
+            return convert(response.text, MARKDOWN_OPTIONS).content
         except Exception:
             return None
 

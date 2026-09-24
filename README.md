@@ -36,7 +36,7 @@ curate_and_deliver (subgraph):
 ```
 
 1. **Scrape** — pulls the last N hours from three sources: the OpenAI and Anthropic news feeds, and any YouTube channels listed in config. New items are written to Postgres; duplicates are skipped by primary key.
-2. **Extract** — two nodes run in parallel: Docling converts Anthropic pages to markdown, and YouTube transcripts are fetched.
+2. **Extract** — two nodes run in parallel: Anthropic pages are fetched and converted to markdown, and YouTube transcripts are pulled. Page chrome and inline images are stripped during conversion so the summarizer's character budget goes to article text.
 3. **Summarize** — a digest chain (Gemini Flash Lite) turns each item into a title and a 2–3 sentence summary, several articles at a time via LangChain's `batch()`.
 4. **Rank** — a curator chain (Gemini Flash) scores every digest 0–10 against the user profile. A validation node checks the ranking covers every article exactly once with no invented IDs; if not, the graph loops back to `rank` with the problems as feedback, and after `MAX_RANK_ATTEMPTS` falls back to recency order rather than sending nothing.
 5. **Email** — an email chain writes an intro, and the top N articles go out as HTML over SMTP.
@@ -133,7 +133,7 @@ A run that finds no new articles is a success, not a failure: it logs `Email: No
 
 Notes on the deployment shape:
 
-- **Docker, not a native Python runtime.** Docling pulls in torch, transformers, and OpenCV, which need system libraries (`libgl1`, `libglib2.0-0`) that the Dockerfile installs.
+- **Memory matters.** HTML is converted with `html-to-markdown` rather than a document-AI library. Docling was an early choice here, but importing it cost 257 MB before any work started, which exceeded Render's 512 MB cron limit once LangGraph was added. The pipeline now peaks around 134 MB.
 - **Cron job, not a web service.** There is no HTTP surface, and a full run takes minutes — well past the request timeouts that serverless platforms impose. This is also why it won't deploy to Vercel.
 - **External database.** Keeping Postgres off Render avoids the free plan's expiry and keeps the data portable. Any provider works as long as `DATABASE_URL` is reachable and allows SSL connections.
 
