@@ -71,6 +71,7 @@ Fill in `.env`:
 | Variable | Notes |
 | --- | --- |
 | `GEMINI_API_KEY` | Required. Get one at [aistudio.google.com](https://aistudio.google.com/apikey) |
+| `GROQ_API_KEY` | Optional but recommended. Cross-provider fallback for when Gemini's daily quota runs out |
 | `DIGEST_MODEL` / `CURATOR_MODEL` / `EMAIL_MODEL` | Optional overrides. See Models below |
 | `MY_EMAIL` / `APP_PASSWORD` | Gmail address and an [app password](https://support.google.com/accounts/answer/185833) — not your account password. Strip the spaces from the 16-character value, and generate it while signed into the same account as `MY_EMAIL` |
 | `DIGEST_RECIPIENTS` | Comma-separated. Defaults to `MY_EMAIL` |
@@ -152,6 +153,8 @@ Google retires model names faster than most providers, and a stale name fails at
 ```bash
 uv run python -c "from app.agent.client import get_client; [print(m.name) for m in get_client().models.list()]"
 ```
+
+Gemini's free tier caps requests **per day per model** (20/day for `gemini-3.5-flash` at time of writing), which takes out every Gemini model at once — switching between Gemini tiers cannot escape it. Setting `GROQ_API_KEY` adds a final fallback on a different provider, so a run still completes when the daily quota is gone. Groq uses `json_schema` structured output rather than tool calling, since the `gpt-oss` models often reply in prose and fail the tool-call requirement.
 
 Transient `503 UNAVAILABLE` responses are common on the Flash models. Every Gemini call retries with exponential backoff inside the Google SDK (`max_retries` on `ChatGoogleGenerativeAI`) and then LangChain's `with_fallbacks()` reruns it on a second model, so a spike no longer loses a whole run. Tune with `GEMINI_MAX_ATTEMPTS` (default 4) and `GEMINI_FALLBACK_MODEL`.
 
