@@ -9,6 +9,9 @@ dependencies = [
     "docling>=2.61.2",
     "feedparser>=6.0.12",
     "google-genai>=2.24.0",
+    "langchain-core>=1.6.4",
+    "langchain-google-genai>=4.4.0",
+    "langgraph>=1.2.12",
     "markdown>=3.7.0",
     "markdownify>=0.11.6",
     "psycopg2-binary>=2.9.11",
@@ -22,4 +25,9 @@ dependencies = [
 [dependency-groups]
 dev = [
     "ipykernel>=7.1.0",
+    "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

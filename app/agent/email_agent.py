@@ -1,12 +1,12 @@
 from datetime import datetime
 from typing import List, Optional
-from google.genai import types
+from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.agent.client import get_client, generate, EMAIL_MODEL
+from app.agent.client import structured_llm, EMAIL_MODEL
 
 
 class EmailIntroduction(BaseModel):
@@ -61,12 +61,22 @@ Your role is to write a warm, professional introduction for a daily AI news dige
 
 Keep it concise (2-3 sentences for the introduction), friendly, and professional."""
 
+INTRO_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", EMAIL_PROMPT),
+    ("human", """Create an email introduction for {name} for {current_date}.
+
+Top 10 ranked articles:
+{article_summaries}
+
+Generate a greeting and introduction that previews these articles."""),
+])
+
 
 class EmailAgent:
     def __init__(self, user_profile: dict):
-        self.client = get_client()
         self.model = EMAIL_MODEL
         self.user_profile = user_profile
+        self.chain = INTRO_PROMPT | structured_llm(EmailIntroduction, self.model, temperature=0.7)
 
     def generate_introduction(self, ranked_articles: List) -> EmailIntroduction:
         if not ranked_articles:
@@ -82,27 +92,13 @@ class EmailAgent:
         ])
         
         current_date = datetime.now().strftime('%B %d, %Y')
-        user_prompt = f"""Create an email introduction for {self.user_profile['name']} for {current_date}.
-
-Top 10 ranked articles:
-{article_summaries}
-
-Generate a greeting and introduction that previews these articles."""
 
         try:
-            response = generate(
-                self.client,
-                self.model,
-                user_prompt,
-                types.GenerateContentConfig(
-                    system_instruction=EMAIL_PROMPT,
-                    temperature=0.7,
-                    response_mime_type="application/json",
-                    response_schema=EmailIntroduction,
-                ),
-            )
-
-            intro = response.parsed
+            intro = self.chain.invoke({
+                "name": self.user_profile["name"],
+                "current_date": current_date,
+                "article_summaries": article_summaries,
+            })
             if not intro.greeting.startswith(f"Hey {self.user_profile['name']}"):
                 intro.greeting = f"Hey {self.user_profile['name']}, here is your daily digest of AI news for {current_date}."
             

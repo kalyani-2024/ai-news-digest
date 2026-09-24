@@ -1,11 +1,12 @@
-from typing import List
-from google.genai import types
+from typing import List, Optional, Tuple
+
+from langchain_core.prompts import ChatPromptTemplate
 from pydantic import BaseModel, Field
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from app.agent.client import get_client, generate, CURATOR_MODEL
+from app.agent.client import structured_llm, CURATOR_MODEL
 
 
 class RankedArticle(BaseModel):
@@ -39,19 +40,65 @@ Scoring Guidelines:
 
 Rank articles from most relevant (rank 1) to least relevant. Ensure each article has a unique rank."""
 
+RANKING_PROMPT = ChatPromptTemplate.from_messages([
+    ("system", "{system_prompt}"),
+    ("human", """Rank these {count} AI news digests based on the user profile:
+
+{digest_list}
+
+Provide a relevance score (0.0-10.0) and rank (1-{count}) for each article, ordered from most to least relevant.
+Use each ID exactly as given, and include every ID exactly once.{feedback}"""),
+])
+
+
+def validate_ranking(
+    ranked: List[RankedArticle], candidate_ids: List[str]
+) -> Tuple[List[RankedArticle], List[str]]:
+    """Check an LLM ranking against the digests it was asked to rank.
+
+    Returns the usable entries, re-ordered and re-numbered, plus a list of
+    problems. An empty problem list means the ranking is complete and trustworthy.
+    Structured output guarantees the JSON shape; it cannot guarantee the model
+    ranked every article or did not invent an ID, so that is checked here.
+    """
+    expected = set(candidate_ids)
+    problems = []
+    seen = set()
+    usable = []
+
+    for article in ranked:
+        if article.digest_id not in expected:
+            problems.append(f"unknown ID {article.digest_id!r} (not in the list you were given)")
+        elif article.digest_id in seen:
+            problems.append(f"duplicate ID {article.digest_id!r}")
+        else:
+            seen.add(article.digest_id)
+            usable.append(article)
+
+    missing = [digest_id for digest_id in candidate_ids if digest_id not in seen]
+    if missing:
+        problems.append(f"missing IDs: {', '.join(missing)}")
+
+    # The score is the model's actual judgement; its rank numbers can collide or
+    # skip, so order by score (rank breaks ties) and number the result 1..n.
+    usable.sort(key=lambda a: (-a.relevance_score, a.rank))
+    usable = [a.model_copy(update={"rank": i}) for i, a in enumerate(usable, 1)]
+    return usable, problems
+
 
 class CuratorAgent:
     def __init__(self, user_profile: dict):
-        self.client = get_client()
         self.model = CURATOR_MODEL
         self.user_profile = user_profile
         self.system_prompt = self._build_system_prompt()
+        # temperature 0.3: ranking should be stable run to run, not creative.
+        self.chain = RANKING_PROMPT | structured_llm(RankedDigestList, self.model, temperature=0.3)
 
     def _build_system_prompt(self) -> str:
         interests = "\n".join(f"- {interest}" for interest in self.user_profile["interests"])
         preferences = self.user_profile["preferences"]
         pref_text = "\n".join(f"- {k}: {v}" for k, v in preferences.items())
-        
+
         return f"""{CURATOR_PROMPT}
 
 User Profile:
@@ -65,35 +112,30 @@ Interests:
 Preferences:
 {pref_text}"""
 
-    def rank_digests(self, digests: List[dict]) -> List[RankedArticle]:
+    def rank_digests(self, digests: List[dict], feedback: Optional[List[str]] = None) -> List[RankedArticle]:
+        """Rank digests against the profile.
+
+        `feedback` lists what was wrong with a previous attempt, so a retry can
+        correct it rather than repeat the same mistake.
+        """
         if not digests:
             return []
-        
+
         digest_list = "\n\n".join([
             f"ID: {d['id']}\nTitle: {d['title']}\nSummary: {d['summary']}\nType: {d['article_type']}"
             for d in digests
         ])
-        
-        user_prompt = f"""Rank these {len(digests)} AI news digests based on the user profile:
-
-{digest_list}
-
-Provide a relevance score (0.0-10.0) and rank (1-{len(digests)}) for each article, ordered from most to least relevant."""
+        feedback_text = ""
+        if feedback:
+            feedback_text = "\n\nYour previous ranking was rejected because of: " + "; ".join(feedback)
 
         try:
-            response = generate(
-                self.client,
-                self.model,
-                user_prompt,
-                types.GenerateContentConfig(
-                    system_instruction=self.system_prompt,
-                    temperature=0.3,
-                    response_mime_type="application/json",
-                    response_schema=RankedDigestList,
-                ),
-            )
-
-            ranked_list = response.parsed
+            ranked_list = self.chain.invoke({
+                "system_prompt": self.system_prompt,
+                "count": len(digests),
+                "digest_list": digest_list,
+                "feedback": feedback_text,
+            })
             return ranked_list.articles if ranked_list else []
         except Exception as e:
             print(f"Error ranking digests: {e}")

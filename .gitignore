@@ -97,3 +97,5 @@ app/alembic/versions/*
 playground/*.png
 
 app/google-service-account.json
+# Dry-run email previews
+output/

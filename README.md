@@ -19,17 +19,29 @@ Each morning the pipeline emails the day's top AI stories, ranked against a pers
 
 ## How it works
 
-The pipeline runs as five sequential stages, orchestrated by `run_daily_pipeline()`:
+The pipeline is a [LangGraph](https://langchain-ai.github.io/langgraph/) `StateGraph`, and every LLM call is a [LangChain](https://python.langchain.com/) chain that returns a validated Pydantic object:
 
 ```
-Scrape  ->  Extract  ->  Summarize  ->  Rank  ->  Email
+                  +-> extract_anthropic -+
+START -> scrape --+                      +-> summarize -> curate_and_deliver -> END
+                  +-> extract_youtube ---+
+
+curate_and_deliver (subgraph):
+  load_candidates --(no digests)--> END
+        |
+        v
+      rank --> validate --(valid)--> compose_email --> send_email
+        ^          |
+        +--retry---+--(still invalid)--> fallback_rank --> compose_email
 ```
 
 1. **Scrape** — pulls the last N hours from three sources: the OpenAI and Anthropic news feeds, and any YouTube channels listed in config. New items are written to Postgres; duplicates are skipped by primary key.
-2. **Extract** — converts article pages to markdown with Docling, and fetches transcripts for YouTube videos.
-3. **Summarize** — a digest agent (Gemini Flash Lite) turns each item into a title and a 2–3 sentence summary.
-4. **Rank** — a curator agent (Gemini Flash) scores every digest 0–10 against the user profile: interests, expertise level, and preferences such as favoring technical depth over marketing copy.
-5. **Email** — an email agent writes an intro, and the top N articles go out as HTML over SMTP.
+2. **Extract** — two nodes run in parallel: Docling converts Anthropic pages to markdown, and YouTube transcripts are fetched.
+3. **Summarize** — a digest chain (Gemini Flash Lite) turns each item into a title and a 2–3 sentence summary, several articles at a time via LangChain's `batch()`.
+4. **Rank** — a curator chain (Gemini Flash) scores every digest 0–10 against the user profile. A validation node checks the ranking covers every article exactly once with no invented IDs; if not, the graph loops back to `rank` with the problems as feedback, and after `MAX_RANK_ATTEMPTS` falls back to recency order rather than sending nothing.
+5. **Email** — an email chain writes an intro, and the top N articles go out as HTML over SMTP.
+
+See the diagram for your checkout with `uv run python main.py --graph` (Mermaid output). For a guided tour of the design, see [docs/INTERVIEW_GUIDE.md](docs/INTERVIEW_GUIDE.md).
 
 ## Project layout
 
@@ -37,10 +49,12 @@ Scrape  ->  Extract  ->  Summarize  ->  Rank  ->  Email
 | --- | --- |
 | `app/scrapers/` | Source-specific scrapers: OpenAI, Anthropic, YouTube |
 | `app/services/` | One module per pipeline stage |
-| `app/agent/` | Gemini client and the three agents: digest, curator, email |
+| `app/agent/` | LangChain model factory and the three agent chains: digest, curator, email |
+| `app/graph/` | LangGraph state, nodes, and graph wiring |
 | `app/database/` | SQLAlchemy models, repository, connection |
 | `app/profiles/` | The interest profile driving ranking |
-| `app/daily_runner.py` | Stage orchestration and logging |
+| `app/daily_runner.py` | Invokes the graph and logs the run summary |
+| `tests/` | Offline graph tests (no network, LLM, or database) |
 | `run_pipeline.py` | Deployment entrypoint (creates tables, then runs) |
 
 ## Setup
@@ -90,6 +104,9 @@ uv run python -m app.database.create_tables
 ```bash
 uv run python main.py            # last 24 hours, top 10 articles
 uv run python main.py 48 15      # last 48 hours, top 15
+uv run python main.py --dry-run  # write output/digest_preview.html instead of emailing
+uv run python main.py --graph    # print the pipeline graph as Mermaid
+uv run pytest                    # offline tests for routing, retry, and fallback
 ```
 
 Individual stages run standalone, which is useful when debugging one part:
@@ -97,7 +114,7 @@ Individual stages run standalone, which is useful when debugging one part:
 ```bash
 uv run python -m app.runner                  # scrape only
 uv run python -m app.services.process_digest # summarize only
-uv run python -m app.services.process_email  # rank and send only
+uv run python -m app.services.process_email  # rank and send only (add --dry-run to preview)
 ```
 
 ## Deploying to Render
@@ -136,7 +153,9 @@ Google retires model names faster than most providers, and a stale name fails at
 uv run python -c "from app.agent.client import get_client; [print(m.name) for m in get_client().models.list()]"
 ```
 
-Transient `503 UNAVAILABLE` responses are common on the Flash models. Every Gemini call retries with exponential backoff and then falls back to a second model, so a spike no longer loses a whole run. Tune with `GEMINI_MAX_ATTEMPTS` (default 4) and `GEMINI_FALLBACK_MODEL`.
+Transient `503 UNAVAILABLE` responses are common on the Flash models. Every Gemini call retries with exponential backoff inside the Google SDK (`max_retries` on `ChatGoogleGenerativeAI`) and then LangChain's `with_fallbacks()` reruns it on a second model, so a spike no longer loses a whole run. Tune with `GEMINI_MAX_ATTEMPTS` (default 4) and `GEMINI_FALLBACK_MODEL`.
+
+Set `LANGSMITH_TRACING=true` and `LANGSMITH_API_KEY` to trace every graph node and LLM call in LangSmith.
 
 Note that the list endpoint advertises models that `generateContent` will still refuse, so confirm with a real call before relying on one. The Pro tier models return `429 RESOURCE_EXHAUSTED` on a free API key — stick to Flash unless the key is on a paid plan.
 

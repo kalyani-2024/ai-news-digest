@@ -27,20 +27,18 @@ def process_digests(limit: Optional[int] = None) -> dict:
     
     logger.info(f"Starting digest processing for {total} articles")
     
-    for idx, article in enumerate(articles, 1):
+    # Summaries are generated concurrently; database writes stay sequential
+    # because a SQLAlchemy session is not safe to share across threads.
+    digest_results = agent.generate_digests(articles)
+    
+    for idx, (article, digest_result) in enumerate(zip(articles, digest_results), 1):
         article_type = article["type"]
         article_id = article["id"]
         article_title = article["title"][:60] + "..." if len(article["title"]) > 60 else article["title"]
         
-        logger.info(f"[{idx}/{total}] Processing {article_type}: {article_title} (ID: {article_id})")
+        logger.info(f"[{idx}/{total}] {article_type}: {article_title} (ID: {article_id})")
         
         try:
-            digest_result = agent.generate_digest(
-                title=article["title"],
-                content=article["content"],
-                article_type=article_type
-            )
-            
             if digest_result:
                 repo.create_digest(
                     article_type=article_type,

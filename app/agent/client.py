@@ -1,15 +1,19 @@
-import logging
-import os
-import random
-import time
+"""LangChain model factory shared by every agent.
 
-from google import genai
-from google.genai import errors
+Each agent builds an LCEL chain: prompt | structured_llm(Schema). This module owns
+the model side of that chain: which Gemini model, how it retries, and what it
+falls back to when the primary model is unavailable.
+"""
+import os
+from typing import Type
+
 from dotenv import load_dotenv
+from google import genai
+from langchain_core.runnables import Runnable
+from langchain_google_genai import ChatGoogleGenerativeAI
+from pydantic import BaseModel
 
 load_dotenv()
-
-logger = logging.getLogger(__name__)
 
 DIGEST_MODEL = os.getenv("DIGEST_MODEL", "gemini-3.5-flash-lite")
 CURATOR_MODEL = os.getenv("CURATOR_MODEL", "gemini-3.5-flash")
@@ -18,49 +22,40 @@ EMAIL_MODEL = os.getenv("EMAIL_MODEL", "gemini-3.5-flash")
 FALLBACK_MODEL = os.getenv("GEMINI_FALLBACK_MODEL", "gemini-3.5-flash-lite")
 MAX_ATTEMPTS = int(os.getenv("GEMINI_MAX_ATTEMPTS", "4"))
 
-# Transient server-side conditions. 429 is included because Gemini uses it for
-# per-minute rate limits as well as hard quota exhaustion, and the former clears.
-RETRY_CODES = {429, 500, 502, 503, 504}
 
-
-def get_client() -> genai.Client:
+def _api_key() -> str:
     api_key = os.getenv("GEMINI_API_KEY")
     if not api_key:
         raise ValueError("GEMINI_API_KEY environment variable is not set")
-    return genai.Client(api_key=api_key)
+    return api_key
 
 
-def generate(client: genai.Client, model: str, contents, config):
-    """Call Gemini, retrying transient failures and falling back to another model.
+def get_client() -> genai.Client:
+    """Raw Gemini SDK client, kept for utilities such as listing available models."""
+    return genai.Client(api_key=_api_key())
 
-    A 503 on the ranking call used to lose an entire pipeline run, so each model
-    is retried with exponential backoff before the fallback model is tried.
+
+def chat_model(model: str, temperature: float) -> ChatGoogleGenerativeAI:
+    # max_retries is passed down to the Google SDK's HTTP retry policy, which
+    # retries 408/429/500/502/503/504 with jittered exponential backoff. That is
+    # the same set of transient errors the old hand-rolled retry loop handled.
+    return ChatGoogleGenerativeAI(
+        model=model,
+        temperature=temperature,
+        max_retries=MAX_ATTEMPTS,
+        google_api_key=_api_key(),
+    )
+
+
+def structured_llm(schema: Type[BaseModel], model: str, temperature: float) -> Runnable:
+    """A model that returns a validated `schema` instance, with model fallback.
+
+    Retries happen per model inside the SDK. Only once the primary model has
+    exhausted them does with_fallbacks() rerun the same request on FALLBACK_MODEL,
+    so a 503 spike on one model tier does not lose the whole run.
     """
-    models = [model] if model == FALLBACK_MODEL else [model, FALLBACK_MODEL]
-    last_error = None
-
-    for model_name in models:
-        for attempt in range(1, MAX_ATTEMPTS + 1):
-            try:
-                return client.models.generate_content(
-                    model=model_name, contents=contents, config=config
-                )
-            except errors.APIError as exc:
-                if exc.code not in RETRY_CODES:
-                    raise
-                last_error = exc
-                if attempt == MAX_ATTEMPTS:
-                    break
-                delay = min(2 ** attempt, 30) + random.uniform(0, 1)
-                logger.warning(
-                    "Gemini %s returned %s, retrying in %.1fs (attempt %d/%d)",
-                    model_name, exc.code, delay, attempt, MAX_ATTEMPTS,
-                )
-                time.sleep(delay)
-
-        if model_name != models[-1]:
-            logger.warning(
-                "Gemini %s exhausted retries, falling back to %s", model_name, models[-1]
-            )
-
-    raise last_error
+    primary = chat_model(model, temperature).with_structured_output(schema)
+    if model == FALLBACK_MODEL:
+        return primary
+    fallback = chat_model(FALLBACK_MODEL, temperature).with_structured_output(schema)
+    return primary.with_fallbacks([fallback])
