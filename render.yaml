@@ -29,6 +29,6 @@ services:
       - key: YOUTUBE_CHANNELS
         sync: false
       - key: PIPELINE_HOURS
-        value: "24"
+        value: "72"
       - key: PIPELINE_TOP_N
         value: "10"
